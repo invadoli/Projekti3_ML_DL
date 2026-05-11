@@ -1,127 +1,71 @@
 import streamlit as st
 import torch
-from PIL import Image
 import numpy as np
+from PIL import Image
 from sod_model import SODModel
-from data_loader import get_transforms
+from torchvision import transforms
+import time
 
-st.set_page_config(
-    page_title="SOD Saliency Detection Demo",
-    layout="wide"
-)
-
-st.title("Saliency Object Detection")
-st.write("Live Demo")
-
+st.set_page_config(page_title="Salient Object Detection Demo", layout="wide")
+st.title("Salient Object Detection (SOD) Demo")
+st.write("Upload an image to see the AI identify the most 'salient' object.")
 
 @st.cache_resource
-def load_model():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+def load_trained_model():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SODModel()
-
     try:
-        state_dict = torch.load(
-            'best_sod_model.pth',
-            map_location=device
-        )
-
-        if 'model_state_dict' in state_dict:
-            model.load_state_dict(state_dict['model_state_dict'])
-        else:
-            model.load_state_dict(state_dict)
-
-    except Exception as e:
-        st.warning(
-            "Weight file 'best_sod_model.pth' not found. Using untrained weights."
-        )
-        st.error(f"Error: {e}")
-
+        state_dict = torch.load('best_sod_model.pth', map_location=device)
+        model.load_state_dict(state_dict)
+    except:
+        st.error("Model weights not found! Make sure 'best_sod_model.pth' is in the folder.")
     model.to(device)
     model.eval()
-
     return model, device
 
+model, device = load_trained_model()
 
-model, device = load_model()
+def preprocess(image):
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    return transform(image).unsqueeze(0).to(device)
 
-
-st.sidebar.header("Settings")
-
-threshold = st.sidebar.slider(
-    "Confidence Threshold",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.5
-)
-
-
-uploaded_file = st.file_uploader(
-    "Choose an image...",
-    type=["jpg", "jpeg", "png"]
-)
-
+uploaded_file = st.sidebar.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-
     image = Image.open(uploaded_file).convert("RGB")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    transform = get_transforms()
-    input_tensor = transform(image).unsqueeze(0).to(device)
-
+    input_tensor = preprocess(image)
+    
+    start_time = time.time()
     with torch.no_grad():
         prediction = model(input_tensor)
-
-        mask = prediction.cpu().squeeze().numpy()
-
-        mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
-
-        binary_mask = (mask > threshold).astype(np.uint8)
-
-    img_array = np.array(image.resize((224, 224)))
-
-    overlay = img_array.copy()
-
-    overlay[binary_mask == 1] = [255, 0, 0]
-
-    combined = (
-        img_array * 0.7 + overlay * 0.3
-    ).astype(np.uint8)
-
-    resized_image = image.resize((244, 244))
-
-    mask_display = Image.fromarray(
-        (mask * 255).astype(np.uint8)
-    ).resize((244, 244))
-
-    combined_display = Image.fromarray(
-        combined
-    ).resize((244, 244))
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("Original Image")
-
-        st.image(
-            resized_image,
-            width=244
-        )
-
+    inference_time = time.time() - start_time
+    
+    pred_mask = prediction.squeeze().cpu().numpy()
+    pred_mask_img = Image.fromarray((pred_mask * 255).astype(np.uint8))
+    
     with col2:
-        st.subheader("Saliency Mask")
+        st.image(pred_mask_img, caption="Predicted Saliency Mask", use_container_width=True)
 
-        st.image(
-            mask_display,
-            width=244
-        )
-
+    mask_resized = pred_mask_img.resize(image.size, resample=Image.BILINEAR)
+    mask_array = np.array(mask_resized) / 255.0
+    
+    img_array = np.array(image) / 255.0
+    overlay = img_array.copy()
+    overlay[:, :, 0] = overlay[:, :, 0] * (1 - mask_array * 0.5) + (mask_array * 0.5) 
+    
     with col3:
-        st.subheader("Final Detection")
-
-        st.image(
-            combined_display,
-            width=244
-        )
-
-    st.success("Object successfully detected!")
+        st.image(overlay, caption=f"Overlay (Inf: {inference_time:.3f}s)", use_container_width=True)
+    
+    st.success(f"Inference completed in {inference_time:.4f} seconds!")
+else:
+    st.info("Please upload an image in the sidebar to start.")
