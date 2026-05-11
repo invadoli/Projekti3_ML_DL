@@ -23,7 +23,8 @@ class SODModel(nn.Module):
         return nn.Sequential(
             nn.Conv2d(in_c, out_c, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_c),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=0.2)
         )
 
     def forward(self, x):

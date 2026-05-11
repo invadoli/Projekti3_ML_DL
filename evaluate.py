@@ -6,9 +6,11 @@ def calculate_metrics(pred, target, threshold=0.6):
     tp = (pred * target).sum()
     fp = (pred * (1 - target)).sum()
     fn = ((1 - pred) * target).sum()
-    
+  
     precision = tp / (tp + fp + 1e-7)
+    
     recall = tp / (tp + fn + 1e-7)
+    
     f1 = 2 * (precision * recall) / (precision + recall + 1e-7)
     
     intersection = tp
